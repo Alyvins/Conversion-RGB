@@ -1,6 +1,6 @@
 """
 Script python créé par S. ROULLET
-Dernière modification le 26/03/2025
+Dernière modification le 28/03/2025
 
 Ce script contient les fonctions pour la fenêtre de conversion des couleurs en valeurs.
 """
@@ -509,7 +509,7 @@ class ConversionWindow:
         df_sortie.columns = [self.nom_X.get(), self.nom_Y.get(), self.nom_Z.get()]
 
         self.queue.put(df_sortie)
-        df_sortie.to_csv(os.path.join(self.dossier_sortie.get(),self.fichier_sortie_csv.get()), index=False)
+        df_sortie.to_csv(os.path.join(self.dossier_sortie.get(),self.fichier_sortie_csv.get()  + ".csv"), index=False)
         self.window.after(1000, self.check_for_updates)
 
 
@@ -517,7 +517,7 @@ class ConversionWindow:
         try:
             df_sortie = self.queue.get_nowait()
             # Sauvegarder la figure une fois que l'interpolation est terminée
-            plot_scatter(df_sortie, self.nom_X.get(), self.nom_Y.get(), self.nom_Z.get(), self.interp_palette, os.path.join(self.dossier_sortie.get(), self.fichier_sortie_image_csv.get()))
+            plot_scatter(df_sortie, self.nom_X.get(), self.nom_Y.get(), self.nom_Z.get(), self.interp_palette, os.path.join(self.dossier_sortie.get(), self.fichier_sortie_image_csv.get()  + ".png"))
         except queue.Empty:
             # Pas encore de mise à jour, vérifier à nouveau
             self.window.after(1000, self.check_for_updates)
@@ -614,7 +614,7 @@ class ConversionWindow:
         self.interp_palette = interpolate_palette(ref_palette, n_points_interpolation)
 
         # === Tracer la palette interpolée verticalement ===
-        plot_palette_vertical(self.interp_palette, os.path.join(self.dossier_sortie.get(), self.fichier_sortie_image_palette.get()), n_ticks_yticks)
+        plot_palette_vertical(self.interp_palette, os.path.join(self.dossier_sortie.get(), self.fichier_sortie_image_palette.get() + ".png"), n_ticks_yticks)
 
         # === Filtrer le tableau en supprimant les lignes à 0 ou NaN ===
         df_filtre = df.loc[~(
