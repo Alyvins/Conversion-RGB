@@ -101,12 +101,13 @@ def plot_palette_vertical(palette, output_file, n_ticks):
 
 
 def create_custom_cmap(palette_df):
-    colors = palette_df[['r', 'g', 'b']].values / 255.0
+    # Tri ascendant pour correspondre à plot_palette_vertical
+    palette_sorted = palette_df.sort_values(by="value", ascending=True).reset_index(drop=True)
+    colors = palette_sorted[['r','g','b']].values / 255.0
 
-    # Création de la colormap avec LinearSegmentedColormap
     cmap = mcolors.LinearSegmentedColormap.from_list("custom_cmap", colors)
-
     return cmap
+
 
 def plot_scatter(dataframe, x_col, y_col, z_col, palette, output_file):
     x_data = dataframe[x_col]
@@ -617,12 +618,16 @@ class ConversionWindow:
         plot_palette_vertical(self.interp_palette, os.path.join(self.dossier_sortie.get(), self.fichier_sortie_image_palette.get() + ".png"), n_ticks_yticks)
 
         # === Filtrer le tableau en supprimant les lignes à 0 ou NaN ===
-        df_filtre = df.loc[~(
-                ((df.iloc[:, col_R] == 255) & (df.iloc[:, col_G] == 255) & (df.iloc[:, col_B] == 255)) |  # Supprimer les lignes (255, 255, 255)
-                ((df.iloc[:, col_R] == 0) & (df.iloc[:, col_G] == 0) & (df.iloc[:, col_B] == 0)) |  # Supprimer les lignes (0, 0, 0)
-                (pd.isna(df.iloc[:, col_R]) | pd.isna(df.iloc[:, col_G]) | pd.isna(df.iloc[:, col_B]))
-        # Supprimer les lignes avec NaN
-        )].reset_index(drop=True)
+        filtre = False
+        if filtre:
+            df_filtre = df.loc[~(
+                    ((df.iloc[:, col_R] == 255) & (df.iloc[:, col_G] == 255) & (df.iloc[:, col_B] == 255)) |  # Supprimer les lignes (255, 255, 255)
+                    ((df.iloc[:, col_R] == 0) & (df.iloc[:, col_G] == 0) & (df.iloc[:, col_B] == 0)) |  # Supprimer les lignes (0, 0, 0)
+                    (pd.isna(df.iloc[:, col_R]) | pd.isna(df.iloc[:, col_G]) | pd.isna(df.iloc[:, col_B]))
+            # Supprimer les lignes avec NaN
+            )].reset_index(drop=True)
+        else:
+            df_filtre= df
 
         # === Associer la valeur interpolée aux couleurs ===
         self.start_thread(df_filtre)

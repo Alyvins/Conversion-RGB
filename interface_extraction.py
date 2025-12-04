@@ -5,6 +5,7 @@ Dernière modification le 26/03/2025
 Ce script contient les fonctions pour la fenêtre d'extraction des couleurs d'une image.
 """
 
+import math
 from tkinter import *
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
@@ -22,6 +23,10 @@ DEFAULT_VALUES = {
     "Valeur Offset Y": 0,
     "Pixel Offset Y": 0,
     "Pas Echantillonage": 1,
+    "Coordonnées Sud-Est (°)": "",
+    "Coordonnées Nord-Ouest (°)": "",
+    "Coordonnées Sud-Ouest (°)": "",
+    "Coordonnées Nord-Est (°)": "",
 }
 
 BG_1 = "#A6E3E9"
@@ -41,6 +46,79 @@ def show_credits():
         "- Matplotlib\n\n"
         "© mars 2025, tous droits réservés."
     )
+
+def parse_coord(text):
+    """Convertit 'lon, lat' en tuple (lon, lat) ou None."""
+    text = text.strip()
+    if "," not in text:
+        return None
+    try:
+        lon, lat = [float(v.strip()) for v in text.split(",")]
+        return lon, lat
+    except:
+        return None
+
+def helmert_transform_from_points(src_pts, dst_pts):
+    """
+    Calcule les paramètres de transformation d’Helmert 2D
+    à partir d'au moins 2 paires de points.
+    src_pts : liste [(x1,y1), (x2,y2), ...]
+    dst_pts : liste [(lon1,lat1), (lon2,lat2), ...]
+    Retourne (s, cosθ, sinθ, tx, ty)
+    """
+
+    # On utilise seulement deux vecteurs principaux (NW->NE et NW->SW)
+    (x1, y1), (x2, y2) = src_pts[:2]
+    (X1, Y1), (X2, Y2) = dst_pts[:2]
+
+    # Vecteurs sources et GPS
+    dx_src = x2 - x1
+    dy_src = y2 - y1
+    dx_dst = X2 - X1
+    dy_dst = Y2 - Y1
+
+    # Échelle
+    norm_src = math.sqrt(dx_src**2 + dy_src**2)
+    norm_dst = math.sqrt(dx_dst**2 + dy_dst**2)
+    s = norm_dst / norm_src if norm_src != 0 else 1
+
+    # Angle rotation
+    angle_src = math.atan2(dy_src, dx_src)
+    angle_dst = math.atan2(dy_dst, dx_dst)
+    theta = angle_dst - angle_src
+
+    cosθ = math.cos(theta)
+    sinθ = math.sin(theta)
+
+    # Translation
+    tx = X1 - s * (cosθ * x1 - sinθ * y1)
+    ty = Y1 - s * (sinθ * x1 + cosθ * y1)
+
+    return s, cosθ, sinθ, tx, ty
+
+def bilinear_geo(x, y, width, height, nw, ne, sw, se):
+    """Interpolation bilinéaire entre 4 coins géographiques."""
+    tx = x / (width - 1)
+    ty = y / (height - 1)
+
+    # interpolation lon
+    lon = (
+        (1 - tx) * (1 - ty) * nw[0] +
+        tx       * (1 - ty) * ne[0] +
+        (1 - tx) * ty       * sw[0] +
+        tx       * ty       * se[0]
+    )
+
+    # interpolation lat
+    lat = (
+        (1 - tx) * (1 - ty) * nw[1] +
+        tx       * (1 - ty) * ne[1] +
+        (1 - tx) * ty       * sw[1] +
+        tx       * ty       * se[1]
+    )
+
+    return lon, lat
+
 
 class ExtractionWindow:
     def __init__(self, root):
@@ -107,7 +185,7 @@ class ExtractionWindow:
 
         self.entries = {}
         for i, (nom, valeur) in enumerate(DEFAULT_VALUES.items()):
-            self.create_entry(nom, valeur, i + 1)
+            self.create_entry(nom, valeur, i)
 
         # Canvas pour l'affichage de l'image
         frame_canvas = Frame(self.window, bg=BG_1)
@@ -142,27 +220,39 @@ class ExtractionWindow:
 
     def create_entry(self, nom, default_value, n):
         """Crée une entrée avec un label et un bouton de sélection si applicable."""
+
+        # Détermine colonne et rangée en fonction de n
+        col = 0 if n < 8 else 2  # 1ère colonne pour n<10, 2ème colonne pour n>=10
+        row_shift = 0 if n < 8 else -8  # Décale l’index pour garder le même espacement vertical
+        row = 2 * (n + row_shift)  # Deux lignes par entrée (label + entry)
+
+        # ---- Label ----
         label = Label(self.frame_entries, text=nom, bg=BG_2, font=("Arial", 12, "bold"))
-        label.grid(row=2 * n, column=0, sticky="w", padx=5, pady=2)
+        label.grid(row=row, column=col, sticky="w", padx=5, pady=2)
 
-        entry = Entry(self.frame_entries,  width=10, relief="solid", highlightbackground=BG_2)
+        # ---- Entry ----
+        entry = Entry(self.frame_entries, width=10, relief="solid", highlightbackground=BG_2)
         entry.insert(0, str(default_value))
-        entry.grid(row=2 * n + 1, column=0, padx=5, pady=2)
+        entry.grid(row=row + 1, column=col, padx=5, pady=2)
 
-        self.entries[nom] = entry  # Correction : stocker avec 'nom' comme clé
+        self.entries[nom] = entry
+
+        # ---- Bouton ----
+        btn_col = col + 1  # Le bouton va dans la colonne juste à droite
 
         if "Pixel Offset X" in nom:
-            Button(self.frame_entries, text="Sélectionner", command=self.select_offset_x_action, bg=BG_2, highlightbackground=BG_2, highlightcolor=FG).grid(row=2 * n + 1,
-                                                                                                      column=1)
+            cmd = self.select_offset_x_action
         elif "Pixel Offset Y" in nom:
-            Button(self.frame_entries, text="Sélectionner", command=self.select_offset_y_action, bg=BG_2, highlightbackground=BG_2, highlightcolor=FG).grid(row=2 * n + 1,
-                                                                                                      column=1)
+            cmd = self.select_offset_y_action
         elif "Longueur Pixels X" in nom:
-            Button(self.frame_entries, text="Sélectionner", command=self.select_value_x_action, bg=BG_2, highlightbackground=BG_2, highlightcolor=FG).grid(row=2 * n + 1,
-                                                                                                     column=1)
+            cmd = self.select_value_x_action
         elif "Longueur Pixels Y" in nom:
-            Button(self.frame_entries, text="Sélectionner", command=self.select_value_y_action, bg=BG_2, highlightbackground=BG_2, highlightcolor=FG).grid(row=2 * n + 1,
-                                                                                                     column=1)
+            cmd = self.select_value_y_action
+        else:
+            cmd = None
+
+        if cmd:
+            Button(self.frame_entries, text="Sélectionner", command=cmd, bg=BG_2, highlightbackground=BG_2, highlightcolor=FG).grid(row=row + 1, column=btn_col)
 
     def open_image(self):
         """Ouvre une image et l'affiche sur le canvas."""
@@ -294,11 +384,10 @@ class ExtractionWindow:
             messagebox.showerror("Erreur", f"Erreur lors du chargement des paramètres : {e}")
 
     def export_csv(self):
-        """Exporte les coordonnées et couleurs des pixels dans un fichier CSV."""
         if self.image is None:
             response = messagebox.askyesno("Erreur", "Aucune image chargée. Voulez-vous en charger une maintenant ?")
-            if response:  # Si l'utilisateur choisit 'Oui'
-                self.open_image()  # Charge l'image
+            if response:
+                self.open_image()
             return
 
         file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("Fichiers CSV", "*.csv")])
@@ -306,28 +395,78 @@ class ExtractionWindow:
             return
 
         try:
-            pixels = self.image.load()  # Accès aux pixels de l'image # Accès aux pixels de l'image
+            pixels = self.image.load()
             pas = self.entries["Pas Echantillonage"].get()
 
-            # Vérification du pas d'échantillonnage (doit être un entier positif)
             if not pas.isdigit() or int(pas) <= 0:
                 messagebox.showerror("Erreur", "Le pas d'échantillonnage doit être un entier positif.")
                 return
-
             pas = int(pas)
 
+            # ---------------------------------------------------
+            # Lecture des coordonnées GPS (2 ou 4 coins)
+            # ---------------------------------------------------
+            nw = parse_coord(self.entries["Coordonnées Nord-Ouest (°)"].get()) # Inversion car l'axe y est descendant
+            ne = parse_coord(self.entries["Coordonnées Nord-Est (°)"].get())
+            sw = parse_coord(self.entries["Coordonnées Sud-Ouest (°)"].get())
+            se = parse_coord(self.entries["Coordonnées Sud-Est (°)"].get())
+
+            width = self.image.width
+            height = self.image.height
+
+            # Initialisation
+            use_four_points = False
+            use_bilinear = False
+            lon_min = lon_max = lat_min = lat_max = None
+
+            # Mode HELMERT si 4 coins donnés
+            if nw and ne and sw and se:
+                use_four_points = True
+
+            # Mode INTERPOLATION si seulement 2 coins donnés
+            elif nw and se:
+                use_bilinear = True
+                lon_min = nw[0]
+                lat_min = se[1]
+                lon_max = se[0]
+                lat_max = nw[1]
+
+            elif ne and sw:
+                use_bilinear = True
+                lon_min = sw[0]
+                lat_min = sw[1]
+                lon_max = ne[0]
+                lat_max = ne[1]
+
+            # ---------------------------------------------------
+            #   ÉCRITURE CSV
+            # ---------------------------------------------------
             with open(file_path, mode='w', newline='') as file:
                 writer = csv.writer(file)
-                writer.writerow(['X', 'Y', 'R', 'G', 'B'])  # En-têtes
+                writer.writerow(['X', 'Y', 'R', 'G', 'B'])
+                for x in range(0, width, pas):
+                    for y in range(0, height, pas):
+                        color = pixels[x, y]
 
-                # Parcours de l'image selon le pas d'échantillonnage
-                for x in range(0, self.image.width, pas):
-                    for y in range(0, self.image.height, pas):
-                        color = pixels[x, y]  # Récupérer la couleur du pixel
-                        real_x, real_y = self.convert_coords(x, self.image.height - y)  # Conversion des coordonnées
-                        if real_x is None or real_y is None:
-                            return
-                        writer.writerow([real_x, real_y, color[0], color[1], color[2]])
+                        # use_four_points
+                        if use_four_points:
+                            lon, lat = bilinear_geo(x, y, self.image.width, self.image.height, nw, ne, sw, se)
+                            writer.writerow([lon, lat, color[0], color[1], color[2]])
+
+                        # INTERPOLATION
+                        elif use_bilinear:
+                            nx = x / (width - 1)
+                            ny = y / (height - 1)
+                            lon = lon_min + nx * (lon_max - lon_min)
+                            lat = lat_max - ny * (lat_max - lat_min)
+                            writer.writerow([lon, lat, color[0], color[1], color[2]])
+
+                        # Conversion normale coords réelles
+                        else:
+                            real_x, real_y = self.convert_coords(x, height - y)
+                            if real_x is None or real_y is None:
+                                return
+                            writer.writerow([real_x, real_y, color[0], color[1], color[2]])
 
             self.is_saved = True
             messagebox.showinfo("Exportation", f"Données exportées vers {file_path}")
